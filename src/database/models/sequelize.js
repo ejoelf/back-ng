@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { Sequelize } from "sequelize";
 
+const isProduction = process.env.NODE_ENV === "production";
+
 export const sequelize = new Sequelize(
   process.env.DB_NAME,
   process.env.DB_USER,
@@ -11,6 +13,11 @@ export const sequelize = new Sequelize(
     dialect: "postgres",
     logging: false,
     timezone: "-03:00",
-    dialectOptions: {},
+    dialectOptions: isProduction ? {
+      ssl: {
+        require: true,
+        rejectUnauthorized: false
+      }
+    } : {},
   }
 );
