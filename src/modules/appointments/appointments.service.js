@@ -104,6 +104,12 @@ function normalizeApptStatusIn(value) {
   return v;
 }
 
+// ✅ FIX TIMEZONE: Devuelve la hora actual en Argentina (UTC-3)
+function nowInArgentina() {
+  const now = new Date();
+  return new Date(now.getTime() - 3 * 60 * 60 * 1000);
+}
+
 function getScheduleFromBusiness(business) {
   const raw = business?.scheduleJson || {};
   const intervals = Array.isArray(raw?.intervals) ? raw.intervals : [];
@@ -341,7 +347,9 @@ export async function getAvailability({ dateStr, serviceId, staffId }) {
   });
 
   const durationMin = Number(service.durationMin || 30);
-  const now = new Date();
+
+  // ✅ FIX TIMEZONE: usamos hora Argentina en lugar de UTC
+  const now = nowInArgentina();
   const todayStr = toDateStrLocal(now);
 
   const slots = [];
