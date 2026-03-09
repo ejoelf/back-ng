@@ -110,6 +110,14 @@ function nowInArgentina() {
   return new Date(now.getTime() - 3 * 60 * 60 * 1000);
 }
 
+// ✅ FIX TIMEZONE: El servidor (Render) corre en UTC puro.
+// combineDateAndTime construye un Date donde "09:00" queda como 09:00 UTC.
+// Para que ese Date represente las 9am Argentina, hay que sumarle 3hs
+// antes de convertir a ISO, así queda "12:00Z" = 9am ARG.
+function toISOArgentina(date) {
+  return new Date(date.getTime() + 3 * 60 * 60 * 1000).toISOString();
+}
+
 function getScheduleFromBusiness(business) {
   const raw = business?.scheduleJson || {};
   const intervals = Array.isArray(raw?.intervals) ? raw.intervals : [];
@@ -375,9 +383,10 @@ export async function getAvailability({ dateStr, serviceId, staffId }) {
 
       if (startsInsideWindow && endsInsideWindow && respectsHalfHour && notPast && !collides) {
         slots.push({
-          startAt: slotStart.toISOString(),
-          endAt: slotEnd.toISOString(),
-          label: timeHHMM(slotStart),
+          // ✅ FIX TIMEZONE: sumamos 3hs para que 09:00 UTC quede como 12:00Z = 9am ARG
+          startAt: toISOArgentina(slotStart),
+          endAt: toISOArgentina(slotEnd),
+          label: timeHHMM(slotStart), // label sigue mostrando "09:00" correctamente
         });
       }
 
