@@ -1,5 +1,5 @@
 import { Op } from "sequelize";
-import { Income, Appointment, Business } from "../../database/models/index.js";
+import { Income, Appointment, Business, Staff } from "../../database/models/index.js";
 import { AppError } from "../../utils/app-error.js";
 
 function pad2(n) {
@@ -61,7 +61,17 @@ function normalizePaidStatus(status) {
   return v;
 }
 
+function timeHHMM(dateLike) {
+  if (!dateLike) return "";
+  const d = new Date(dateLike);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
 function serializeIncome(row) {
+  const appointment = row.appointment || null;
+  const appointmentStaff = appointment?.staff || null;
+
   return {
     id: row.id,
     appointmentId: row.appointmentId,
@@ -76,6 +86,14 @@ function serializeIncome(row) {
     paidStatus: row.paidStatus || "pending",
     detail: row.detail || "",
     paidAt: row.paidAt || null,
+
+    appointmentStartAt: appointment?.startAt || null,
+    appointmentTime: appointment?.startAt ? timeHHMM(appointment.startAt) : "",
+    staffName:
+      row.staffName ||
+      appointment?.staffName ||
+      appointmentStaff?.name ||
+      "",
   };
 }
 
@@ -99,6 +117,13 @@ export async function getIncomeByAppointmentId({ appointmentId }) {
       businessId: business.id,
       appointmentId,
     },
+    include: [
+      {
+        model: Appointment,
+        as: "appointment",
+        include: [{ model: Staff, as: "staff" }],
+      },
+    ],
   });
 
   if (!row) return null;
@@ -114,6 +139,13 @@ export async function listIncomesByDate({ dateStr }) {
       businessId: business.id,
       date: cleanDate,
     },
+    include: [
+      {
+        model: Appointment,
+        as: "appointment",
+        include: [{ model: Staff, as: "staff" }],
+      },
+    ],
     order: [
       ["date", "ASC"],
       ["createdAt", "ASC"],
@@ -121,6 +153,66 @@ export async function listIncomesByDate({ dateStr }) {
   });
 
   return rows.map(serializeIncome);
+}
+
+export async function getClientsDebtStatus() {
+  const business = await getMainBusiness();
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+
+  const rows = await Income.findAll({
+    where: {
+      businessId: business.id,
+      clientName: {
+        [Op.ne]: "Caja",
+      },
+    },
+    order: [
+      ["date", "DESC"],
+      ["createdAt", "DESC"],
+    ],
+  });
+
+  const result = {};
+
+  for (const row of rows) {
+    const clientName = safeString(row.clientName);
+    if (!clientName) continue;
+
+    if (!result[clientName]) {
+      result[clientName] = "green";
+    }
+
+    if (row.paidStatus === "paid" || row.paidStatus === "void") {
+      continue;
+    }
+
+    const rowDate = safeString(row.date);
+    if (!rowDate) {
+      result[clientName] = "red";
+      continue;
+    }
+
+    const d = new Date(`${rowDate}T00:00:00`);
+    if (Number.isNaN(d.getTime())) {
+      result[clientName] = "red";
+      continue;
+    }
+
+    const sameMonth =
+      d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+
+    if (sameMonth) {
+      if (result[clientName] !== "red") {
+        result[clientName] = "orange";
+      }
+    } else {
+      result[clientName] = "red";
+    }
+  }
+
+  return result;
 }
 
 export async function markIncomePaid({
@@ -181,7 +273,17 @@ export async function markIncomePaid({
     }
   }
 
-  return serializeIncome(row);
+  const updated = await Income.findByPk(row.id, {
+    include: [
+      {
+        model: Appointment,
+        as: "appointment",
+        include: [{ model: Staff, as: "staff" }],
+      },
+    ],
+  });
+
+  return serializeIncome(updated);
 }
 
 export async function setIncomeStatus({ incomeId, paidStatus }) {
@@ -227,7 +329,17 @@ export async function setIncomeStatus({ incomeId, paidStatus }) {
 
   await row.save();
 
-  return serializeIncome(row);
+  const updated = await Income.findByPk(row.id, {
+    include: [
+      {
+        model: Appointment,
+        as: "appointment",
+        include: [{ model: Staff, as: "staff" }],
+      },
+    ],
+  });
+
+  return serializeIncome(updated);
 }
 
 export async function createManualIncome({
@@ -290,6 +402,13 @@ export async function listIncomesByRange({ from, to }) {
         [Op.lte]: cleanTo,
       },
     },
+    include: [
+      {
+        model: Appointment,
+        as: "appointment",
+        include: [{ model: Staff, as: "staff" }],
+      },
+    ],
     order: [
       ["date", "ASC"],
       ["createdAt", "ASC"],

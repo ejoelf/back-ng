@@ -1,7 +1,7 @@
 import { User, Business } from "../../database/models/index.js";
 import { AppError } from "../../utils/app-error.js";
 import { comparePassword, hashPassword } from "../../utils/password.js";
-import { signAccessToken, signRefreshToken } from "../../utils/jwt.js";
+import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../../utils/jwt.js";
 
 function sanitizeUser(user) {
   return {
@@ -75,6 +75,36 @@ export async function loginUser({ username, password }) {
     user: sanitizeUser(user),
     business: sanitizeBusiness(business),
   };
+}
+
+// ✅ nuevo: verifica el refresh token y emite un nuevo access token
+export async function refreshSession({ refreshToken }) {
+  if (!refreshToken) {
+    throw new AppError("Refresh token requerido.", 401);
+  }
+
+  // verifyRefreshToken lanza error si el token es inválido o expiró
+  let payload;
+  try {
+    payload = verifyRefreshToken(refreshToken);
+  } catch {
+    throw new AppError("Sesión expirada. Iniciá sesión nuevamente.", 401);
+  }
+
+  // verificamos que el usuario siga existiendo y activo
+  const user = await User.findByPk(payload.userId);
+
+  if (!user || !user.isActive) {
+    throw new AppError("Usuario no encontrado o inactivo.", 401);
+  }
+
+  const accessToken = signAccessToken({
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+  });
+
+  return { accessToken };
 }
 
 export async function getCurrentSession({ userId }) {

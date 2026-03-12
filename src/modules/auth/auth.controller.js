@@ -3,6 +3,7 @@ import {
   loginUser,
   getCurrentSession,
   updateCredentials,
+  refreshSession,
 } from "./auth.service.js";
 
 export async function loginController(req, res, next) {
@@ -19,6 +20,25 @@ export async function loginController(req, res, next) {
         refreshToken: result.refreshToken,
         user: result.user,
         business: result.business,
+      },
+      200
+    );
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// ✅ nuevo: recibe el refresh token y devuelve un nuevo access token
+export async function refreshController(req, res, next) {
+  try {
+    const result = await refreshSession({
+      refreshToken: req.body?.refreshToken,
+    });
+
+    return ok(
+      res,
+      {
+        accessToken: result.accessToken,
       },
       200
     );

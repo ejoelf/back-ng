@@ -11,6 +11,11 @@ function normalizeAllowedStaffIds(value) {
   return [...new Set(value.filter(Boolean).map((x) => String(x).trim()))];
 }
 
+function normalizeDisplayOrder(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
 function mapService(service) {
   return {
     id: service.id,
@@ -20,6 +25,7 @@ function mapService(service) {
     durationMin: service.durationMin,
     price: service.price,
     imageUrl: service.imageUrl || "",
+    displayOrder: Number(service.displayOrder ?? 0) || 0,
     isActive: Boolean(service.isActive),
     allowedStaffIds: Array.isArray(service.allowedStaff)
       ? service.allowedStaff.map((staff) => staff.id)
@@ -39,7 +45,10 @@ export async function listServicesService() {
         through: { attributes: [] },
       },
     ],
-    order: [["createdAt", "ASC"]],
+    order: [
+      ["displayOrder", "ASC"],
+      ["createdAt", "ASC"],
+    ],
   });
 
   return services.map(mapService);
@@ -59,6 +68,7 @@ export async function createServiceService(payload) {
         durationMin: payload.durationMin,
         price: payload.price,
         imageUrl: payload.imageUrl || "",
+        displayOrder: normalizeDisplayOrder(payload.displayOrder),
         isActive: true,
       },
       { transaction }
@@ -114,6 +124,7 @@ export async function updateServiceService(serviceId, payload) {
         durationMin: payload.durationMin,
         price: payload.price,
         imageUrl: payload.imageUrl || "",
+        displayOrder: normalizeDisplayOrder(payload.displayOrder),
       },
       { transaction }
     );
@@ -173,10 +184,7 @@ export async function deleteServiceService(serviceId) {
     throw err;
   }
 
-  await ServiceStaff.destroy({
-    where: { serviceId },
-  });
-
+  await ServiceStaff.destroy({ where: { serviceId } });
   await service.destroy();
 
   return true;

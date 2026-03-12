@@ -1,4 +1,5 @@
 import { ok } from "../../utils/apiResponse.js";
+import { env } from "../../config/env.js";
 import {
   getAvailability,
   listAppointmentsByDate,
@@ -8,6 +9,24 @@ import {
   cancelAppointment,
   rescheduleAppointment,
 } from "./appointments.service.js";
+import { sendAppointmentConfirmationEmail } from "../../utils/mailer.js";
+
+function safeString(value) {
+  return value == null ? "" : String(value).trim();
+}
+
+async function trySendAppointmentEmail(appointment) {
+  try {
+    return await sendAppointmentConfirmationEmail({
+      appointment,
+      businessName: env.businessPublicName,
+      businessWhatsapp: env.businessWhatsapp,
+    });
+  } catch (error) {
+    console.error("[mail] No se pudo enviar el email de confirmación:", error);
+    return { sent: false, skipped: false, reason: "send-error" };
+  }
+}
 
 export async function getPublicAvailabilityController(req, res, next) {
   try {
@@ -74,6 +93,17 @@ export async function createPublicAppointmentController(req, res, next) {
   try {
     const { serviceId, staffId, startAt, notes, channel, client } = req.body;
 
+    const clientEmail = safeString(client?.email);
+
+    if (!clientEmail) {
+      return res.status(400).json({
+        ok: false,
+        error: {
+          message: "El email del cliente es obligatorio.",
+        },
+      });
+    }
+
     const appointment = await createAppointment({
       serviceId,
       staffId,
@@ -86,15 +116,20 @@ export async function createPublicAppointmentController(req, res, next) {
           client?.name ||
           `${String(client?.firstName || "").trim()} ${String(client?.lastName || "").trim()}`.trim(),
         phone: client?.phone,
-        email: client?.email,
+        email: clientEmail,
       },
     });
+
+    const emailResult = await trySendAppointmentEmail(appointment);
 
     return ok(
       res,
       {
-        message: "Turno creado correctamente.",
+        message: emailResult?.sent
+          ? "Turno creado correctamente y email enviado."
+          : "Turno creado correctamente.",
         appointment,
+        emailNotification: emailResult,
       },
       201
     );
@@ -112,6 +147,7 @@ export async function createManualAppointmentController(req, res, next) {
       notes,
       channel,
       allowOverlap,
+      sendEmailNotification,
       client,
       clientName,
       clientPhone,
@@ -123,6 +159,8 @@ export async function createManualAppointmentController(req, res, next) {
       clientName ||
       `${String(client?.firstName || "").trim()} ${String(client?.lastName || "").trim()}`.trim();
 
+    const finalClientEmail = safeString(client?.email || clientEmail);
+
     const appointment = await createAppointment({
       serviceId,
       staffId,
@@ -133,15 +171,29 @@ export async function createManualAppointmentController(req, res, next) {
       client: {
         name: fallbackName,
         phone: client?.phone || clientPhone,
-        email: client?.email || clientEmail,
+        email: finalClientEmail,
       },
     });
+
+    let emailResult = {
+      sent: false,
+      skipped: true,
+      reason: finalClientEmail ? "manual-opt-out" : "missing-recipient",
+    };
+
+    if (finalClientEmail && Boolean(sendEmailNotification)) {
+      emailResult = await trySendAppointmentEmail(appointment);
+    }
 
     return ok(
       res,
       {
-        message: "Turno creado correctamente.",
+        message:
+          emailResult?.sent
+            ? "Turno creado correctamente y email enviado."
+            : "Turno creado correctamente.",
         appointment,
+        emailNotification: emailResult,
       },
       201
     );

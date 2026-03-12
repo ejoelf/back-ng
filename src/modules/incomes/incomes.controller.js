@@ -6,6 +6,7 @@ import {
   setIncomeStatus,
   createManualIncome,
   listIncomesByRange,
+  getClientsDebtStatus,
 } from "./incomes.service.js";
 
 export async function getIncomeByAppointmentIdController(req, res, next) {
@@ -27,6 +28,15 @@ export async function listIncomesByDateController(req, res, next) {
     const incomes = await listIncomesByDate({ dateStr });
 
     return ok(res, { incomes });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getClientsDebtStatusController(req, res, next) {
+  try {
+    const clientStatus = await getClientsDebtStatus();
+    return ok(res, { clientStatus });
   } catch (error) {
     return next(error);
   }

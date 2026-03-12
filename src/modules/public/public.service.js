@@ -46,6 +46,7 @@ function mapService(service) {
     durationMin: service.durationMin,
     price: service.price,
     imageUrl: service.imageUrl || "",
+    displayOrder: Number(service.displayOrder ?? 0) || 0,
     allowedStaffIds: Array.isArray(service.allowedStaff)
       ? service.allowedStaff.map((staff) => staff.id)
       : [],
@@ -60,6 +61,7 @@ function mapStaff(staff) {
     lastName: staff.lastName || "",
     bio: staff.bio || "",
     photoUrl: staff.photoUrl || "",
+    displayOrder: Number(staff.displayOrder ?? 0) || 0,
     isOwner: Boolean(staff.isOwner),
     skills: parseJsonField(staff.skillsJson, []),
     scheduleOverride: parseJsonField(staff.scheduleOverrideJson, null),
@@ -86,7 +88,10 @@ export async function getPublicServices() {
         through: { attributes: [] },
       },
     ],
-    order: [["createdAt", "ASC"]],
+    order: [
+      ["displayOrder", "ASC"],
+      ["createdAt", "ASC"],
+    ],
   });
 
   return services.map(mapService);
@@ -96,6 +101,7 @@ export async function getPublicStaff() {
   const staff = await Staff.findAll({
     where: { isActive: true },
     order: [
+      ["displayOrder", "ASC"],
       ["isOwner", "DESC"],
       ["createdAt", "ASC"],
     ],

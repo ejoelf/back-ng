@@ -5,6 +5,14 @@ function safeTrim(value) {
   return String(value ?? "").trim();
 }
 
+function capitalizeWords(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function isValidEmail(email) {
   if (!email) return true;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim());
@@ -65,7 +73,7 @@ export async function listClients() {
 export async function createClient(payload) {
   const business = await getMainBusiness();
 
-  const name = safeTrim(payload?.name);
+  const name = capitalizeWords(payload?.name);
   const phone = safeTrim(payload?.phone);
   const email = safeTrim(payload?.email);
   const birthday = safeTrim(payload?.birthday);
@@ -119,7 +127,7 @@ export async function updateClient(clientId, payload) {
   }
 
   const nextName =
-    payload?.name != null ? safeTrim(payload.name) : safeTrim(row.name);
+    payload?.name != null ? capitalizeWords(payload.name) : capitalizeWords(row.name);
 
   const nextPhone =
     payload?.phone != null ? safeTrim(payload.phone) : safeTrim(row.phone);

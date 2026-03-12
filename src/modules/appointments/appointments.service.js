@@ -12,80 +12,35 @@ import {
   SpecialDay,
 } from "../../database/models/index.js";
 import { AppError } from "../../utils/app-error.js";
+import { env } from "../../config/env.js";
+import {
+  BUSINESS_TZ,
+  nowInBusinessTz,
+  parseDateStrInBusinessTz,
+  combineBusinessDateAndTime,
+  toBusinessDateStr,
+  toBusinessHHMM,
+  businessDateTimeToUTCDate,
+  utcDateToBusinessDateTime,
+  addMinutesToDateTime,
+  startOfBusinessDayUTC,
+  endOfBusinessDayUTC,
+} from "../../utils/datetime.js";
+import {
+  sendAppointmentCancellationEmail,
+  sendAppointmentRescheduledEmail,
+} from "../../utils/mailer.js";
 
-function pad2(n) {
-  return String(n).padStart(2, "0");
-}
-
-function toDateStrLocal(date) {
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-}
-
-function parseDateStr(dateStr) {
-  const value = String(dateStr || "").trim();
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw new AppError("La fecha es inválida. Usá formato YYYY-MM-DD.", 400);
-  }
-
-  const [y, m, d] = value.split("-").map(Number);
-  const dt = new Date(y, m - 1, d, 0, 0, 0, 0);
-
-  if (Number.isNaN(dt.getTime())) {
-    throw new AppError("La fecha es inválida.", 400);
-  }
-
-  return dt;
-}
-
-function parseHHMM(hhmm) {
-  const value = String(hhmm || "").trim();
-
-  if (!/^\d{2}:\d{2}$/.test(value)) {
-    throw new AppError("El horario es inválido. Usá HH:MM.", 400);
-  }
-
-  const [h, m] = value.split(":").map(Number);
-
-  if (
-    !Number.isInteger(h) ||
-    !Number.isInteger(m) ||
-    h < 0 ||
-    h > 23 ||
-    m < 0 ||
-    m > 59
-  ) {
-    throw new AppError("El horario es inválido.", 400);
-  }
-
-  return { h, m };
-}
-
-function combineDateAndTime(dateStr, hhmm) {
-  const base = parseDateStr(dateStr);
-  const { h, m } = parseHHMM(hhmm);
-  base.setHours(h, m, 0, 0);
-  return base;
-}
-
-function addMinutes(date, minutes) {
-  return new Date(date.getTime() + Number(minutes || 0) * 60000);
-}
-
-function timeHHMM(date) {
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+function safeString(value) {
+  return value == null ? "" : String(value).trim();
 }
 
 function overlaps(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
 }
 
-function safeString(value) {
-  return value == null ? "" : String(value).trim();
-}
-
-function only00or30(date) {
-  const m = date.getMinutes();
+function only00or30FromDateTime(dt) {
+  const m = dt.minute;
   return m === 0 || m === 30;
 }
 
@@ -104,18 +59,58 @@ function normalizeApptStatusIn(value) {
   return v;
 }
 
-// ✅ FIX TIMEZONE: Devuelve la hora actual en Argentina (UTC-3)
-function nowInArgentina() {
-  const now = new Date();
-  return new Date(now.getTime() - 3 * 60 * 60 * 1000);
+function capitalizeName(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-// ✅ FIX TIMEZONE: El servidor (Render) corre en UTC puro.
-// combineDateAndTime construye un Date donde "09:00" queda como 09:00 UTC.
-// Para que ese Date represente las 9am Argentina, hay que sumarle 3hs
-// antes de convertir a ISO, así queda "12:00Z" = 9am ARG.
-function toISOArgentina(date) {
-  return new Date(date.getTime() + 3 * 60 * 60 * 1000).toISOString();
+function parseDateStr(dateStr) {
+  try {
+    return parseDateStrInBusinessTz(dateStr, BUSINESS_TZ);
+  } catch {
+    throw new AppError("La fecha es inválida. Usá formato YYYY-MM-DD.", 400);
+  }
+}
+
+function combineDateAndTime(dateStr, hhmm) {
+  try {
+    return combineBusinessDateAndTime(dateStr, hhmm, BUSINESS_TZ);
+  } catch {
+    throw new AppError("El horario es inválido.", 400);
+  }
+}
+
+function addMinutes(dateTime, minutes) {
+  return addMinutesToDateTime(dateTime, minutes);
+}
+
+function timeHHMM(dateLike) {
+  if (dateLike?.toFormat) {
+    return dateLike.toFormat("HH:mm");
+  }
+  return toBusinessHHMM(dateLike, BUSINESS_TZ);
+}
+
+function fireAndForget(promiseFactory) {
+  Promise.resolve()
+    .then(() => promiseFactory())
+    .catch((error) => {
+      console.error("[mailer] error enviando email:", error?.message || error);
+    });
+}
+
+async function getMainBusiness() {
+  const business = await Business.findOne({
+    order: [["createdAt", "ASC"]],
+  });
+
+  if (!business) {
+    throw new AppError("No existe un negocio configurado todavía.", 500);
+  }
+
+  return business;
 }
 
 function getScheduleFromBusiness(business) {
@@ -158,22 +153,10 @@ function getActiveIntervals({ business, staff, specialDay, dateStr }) {
   }
 
   const schedule = getScheduleFromStaffOrBusiness(staff, business);
-  const day = parseDateStr(dateStr).getDay();
+  const day = parseDateStr(dateStr).weekday % 7;
 
   if (!schedule.openDays.includes(day)) return [];
   return schedule.intervals;
-}
-
-async function getMainBusiness() {
-  const business = await Business.findOne({
-    order: [["createdAt", "ASC"]],
-  });
-
-  if (!business) {
-    throw new AppError("No existe un negocio configurado todavía.", 500);
-  }
-
-  return business;
 }
 
 async function getValidatedServiceAndStaff({ serviceId, staffId }) {
@@ -220,8 +203,8 @@ async function getValidatedServiceAndStaff({ serviceId, staffId }) {
 }
 
 async function getBusyItems({ businessId, staffId, dateStr }) {
-  const dayStart = combineDateAndTime(dateStr, "00:00");
-  const dayEnd = addMinutes(dayStart, 24 * 60);
+  const dayStart = startOfBusinessDayUTC(dateStr, BUSINESS_TZ);
+  const dayEnd = endOfBusinessDayUTC(dateStr, BUSINESS_TZ);
 
   const [appointments, blocks, recurringBlocks] = await Promise.all([
     Appointment.findAll({
@@ -249,7 +232,7 @@ async function getBusyItems({ businessId, staffId, dateStr }) {
     RecurringBlock.findAll({
       where: {
         businessId,
-        dayOfWeek: parseDateStr(dateStr).getDay(),
+        dayOfWeek: parseDateStr(dateStr).weekday % 7,
         [Op.or]: [{ staffId: null }, { staffId }],
       },
       order: [["start", "ASC"]],
@@ -268,18 +251,24 @@ async function getBusyItems({ businessId, staffId, dateStr }) {
   }
 
   for (const b of blocks) {
+    const startDt = combineDateAndTime(dateStr, b.start);
+    const endDt = combineDateAndTime(dateStr, b.end);
+
     busy.push({
-      startAt: combineDateAndTime(dateStr, b.start),
-      endAt: combineDateAndTime(dateStr, b.end),
+      startAt: businessDateTimeToUTCDate(startDt),
+      endAt: businessDateTimeToUTCDate(endDt),
       type: "block",
       id: b.id,
     });
   }
 
   for (const rb of recurringBlocks) {
+    const startDt = combineDateAndTime(dateStr, rb.start);
+    const endDt = combineDateAndTime(dateStr, rb.end);
+
     busy.push({
-      startAt: combineDateAndTime(dateStr, rb.start),
-      endAt: combineDateAndTime(dateStr, rb.end),
+      startAt: businessDateTimeToUTCDate(startDt),
+      endAt: businessDateTimeToUTCDate(endDt),
       type: "recurring_block",
       id: rb.id,
     });
@@ -315,9 +304,9 @@ function serializeAppointment(row) {
 
     price: Number(row.price ?? service?.price ?? 0) || 0,
 
-    dateStr: row.startAt ? toDateStrLocal(new Date(row.startAt)) : "",
-    start: row.startAt ? timeHHMM(new Date(row.startAt)) : "",
-    end: row.endAt ? timeHHMM(new Date(row.endAt)) : "",
+    dateStr: row.startAt ? toBusinessDateStr(row.startAt, BUSINESS_TZ) : "",
+    start: row.startAt ? toBusinessHHMM(row.startAt, BUSINESS_TZ) : "",
+    end: row.endAt ? toBusinessHHMM(row.endAt, BUSINESS_TZ) : "",
   };
 }
 
@@ -355,10 +344,8 @@ export async function getAvailability({ dateStr, serviceId, staffId }) {
   });
 
   const durationMin = Number(service.durationMin || 30);
-
-  // ✅ FIX TIMEZONE: usamos hora Argentina en lugar de UTC
-  const now = nowInArgentina();
-  const todayStr = toDateStrLocal(now);
+  const nowBusiness = nowInBusinessTz(BUSINESS_TZ);
+  const todayStr = nowBusiness.toFormat("yyyy-MM-dd");
 
   const slots = [];
 
@@ -366,27 +353,29 @@ export async function getAvailability({ dateStr, serviceId, staffId }) {
     const intervalStart = combineDateAndTime(dateStrSafe, interval.start);
     const intervalEnd = combineDateAndTime(dateStrSafe, interval.end);
 
-    let current = new Date(intervalStart);
+    let current = intervalStart;
 
     while (current < intervalEnd) {
-      const slotStart = new Date(current);
+      const slotStart = current;
       const slotEnd = addMinutes(slotStart, durationMin);
+
+      const slotStartUTC = businessDateTimeToUTCDate(slotStart);
+      const slotEndUTC = businessDateTimeToUTCDate(slotEnd);
 
       const startsInsideWindow = slotStart >= intervalStart && slotStart < intervalEnd;
       const endsInsideWindow = slotEnd <= intervalEnd;
-      const respectsHalfHour = only00or30(slotStart);
-      const notPast = dateStrSafe !== todayStr || slotStart >= now;
+      const respectsHalfHour = only00or30FromDateTime(slotStart);
+      const notPast = dateStrSafe !== todayStr || slotStart >= nowBusiness;
 
       const collides = busyItems.some((item) =>
-        overlaps(slotStart, slotEnd, item.startAt, item.endAt)
+        overlaps(slotStartUTC, slotEndUTC, item.startAt, item.endAt)
       );
 
       if (startsInsideWindow && endsInsideWindow && respectsHalfHour && notPast && !collides) {
         slots.push({
-          // ✅ FIX TIMEZONE: sumamos 3hs para que 09:00 UTC quede como 12:00Z = 9am ARG
-          startAt: toISOArgentina(slotStart),
-          endAt: toISOArgentina(slotEnd),
-          label: timeHHMM(slotStart), // label sigue mostrando "09:00" correctamente
+          startAt: slotStartUTC.toISOString(),
+          endAt: slotEndUTC.toISOString(),
+          label: timeHHMM(slotStart),
         });
       }
 
@@ -406,14 +395,17 @@ export async function listAppointmentsByDate({ dateStr, staffId }) {
 
   const business = await getMainBusiness();
 
-  const dayStart = combineDateAndTime(dateStrSafe, "00:00");
-  const dayEnd = addMinutes(dayStart, 24 * 60);
+  const dayStart = startOfBusinessDayUTC(dateStrSafe, BUSINESS_TZ);
+  const dayEnd = endOfBusinessDayUTC(dateStrSafe, BUSINESS_TZ);
 
   const where = {
     businessId: business.id,
     startAt: {
       [Op.gte]: dayStart,
       [Op.lt]: dayEnd,
+    },
+    status: {
+      [Op.ne]: "cancelled",
     },
   };
 
@@ -485,7 +477,7 @@ async function findOrCreateClient({ transaction, businessId, client }) {
     row = await Client.create(
       {
         businessId,
-        name,
+        name: capitalizeName(name),
         phone,
         email: email || null,
         notes: null,
@@ -499,7 +491,7 @@ async function findOrCreateClient({ transaction, businessId, client }) {
 
   const patch = {};
 
-  if (!safeString(row.name)) patch.name = name;
+  if (!safeString(row.name)) patch.name = capitalizeName(name);
   if (email && !safeString(row.email)) patch.email = email;
   if (row.isActive === false) patch.isActive = true;
 
@@ -553,13 +545,16 @@ export async function createAppointment({
     throw new AppError("La fecha/hora del turno es inválida.", 400);
   }
 
-  if (!only00or30(start)) {
+  const startBusiness = utcDateToBusinessDateTime(start, BUSINESS_TZ);
+
+  if (!only00or30FromDateTime(startBusiness)) {
     throw new AppError("Los turnos solo pueden arrancar en :00 o :30.", 400);
   }
 
   const businessId = service.businessId;
-  const dateStr = toDateStrLocal(start);
-  const end = addMinutes(start, Number(service.durationMin || 30));
+  const dateStr = toBusinessDateStr(start, BUSINESS_TZ);
+  const end = addMinutesToDateTime(startBusiness, Number(service.durationMin || 30));
+  const endUTC = businessDateTimeToUTCDate(end);
 
   return sequelize.transaction(async (transaction) => {
     const clientRow = await findOrCreateClient({
@@ -573,7 +568,7 @@ export async function createAppointment({
       staffId,
       dateStr,
       startAt: start,
-      endAt: end,
+      endAt: endUTC,
       allowOverlap: Boolean(allowOverlap),
     });
 
@@ -584,7 +579,7 @@ export async function createAppointment({
         serviceId: service.id,
         staffId: staff.id,
         startAt: start,
-        endAt: end,
+        endAt: endUTC,
         status: "confirmed",
         notes: safeString(notes) || null,
         channel: safeString(channel) || "web",
@@ -658,6 +653,8 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
 }
 
 export async function cancelAppointment({ appointmentId }) {
+  const business = await getMainBusiness();
+
   const row = await Appointment.findByPk(appointmentId);
 
   if (!row) {
@@ -679,6 +676,18 @@ export async function cancelAppointment({ appointmentId }) {
     await income.save();
   }
 
+  const serialized = serializeAppointment(row);
+
+  if (serialized.clientEmail) {
+    fireAndForget(() =>
+      sendAppointmentCancellationEmail({
+        appointment: serialized,
+        businessName: business.publicName || env.businessPublicName,
+        businessWhatsapp: business.whatsapp || env.businessWhatsapp,
+      })
+    );
+  }
+
   return row;
 }
 
@@ -687,10 +696,13 @@ export async function rescheduleAppointment({
   newStartAtISO,
   newStaffId,
 }) {
+  const business = await getMainBusiness();
+
   const row = await Appointment.findByPk(appointmentId, {
     include: [
       { model: Service, as: "service" },
       { model: Staff, as: "staff" },
+      { model: Client, as: "client" },
     ],
   });
 
@@ -702,6 +714,7 @@ export async function rescheduleAppointment({
     throw new AppError("No se puede reprogramar un turno cancelado.", 400);
   }
 
+  const previousSerialized = serializeAppointment(row);
   const targetStaffId = safeString(newStaffId) || row.staffId;
 
   const { service, staff } = await getValidatedServiceAndStaff({
@@ -715,19 +728,22 @@ export async function rescheduleAppointment({
     throw new AppError("La nueva fecha/hora es inválida.", 400);
   }
 
-  if (!only00or30(start)) {
+  const startBusiness = utcDateToBusinessDateTime(start, BUSINESS_TZ);
+
+  if (!only00or30FromDateTime(startBusiness)) {
     throw new AppError("Los turnos solo pueden arrancar en :00 o :30.", 400);
   }
 
-  const end = addMinutes(start, Number(service.durationMin || 30));
-  const dateStr = toDateStrLocal(start);
+  const endBusiness = addMinutesToDateTime(startBusiness, Number(service.durationMin || 30));
+  const endUTC = businessDateTimeToUTCDate(endBusiness);
+  const dateStr = toBusinessDateStr(start, BUSINESS_TZ);
 
   await ensureSlotAvailable({
     businessId: row.businessId,
     staffId: targetStaffId,
     dateStr,
     startAt: start,
-    endAt: end,
+    endAt: endUTC,
     allowOverlap: false,
     excludeAppointmentId: row.id,
   });
@@ -735,7 +751,7 @@ export async function rescheduleAppointment({
   row.staffId = targetStaffId;
   row.staffName = staff.name;
   row.startAt = start;
-  row.endAt = end;
+  row.endAt = endUTC;
   row.status = "rescheduled";
 
   await row.save();
@@ -757,5 +773,18 @@ export async function rescheduleAppointment({
     ],
   });
 
-  return serializeAppointment(updated);
+  const updatedSerialized = serializeAppointment(updated);
+
+  if (updatedSerialized.clientEmail) {
+    fireAndForget(() =>
+      sendAppointmentRescheduledEmail({
+        previousAppointment: previousSerialized,
+        updatedAppointment: updatedSerialized,
+        businessName: business.publicName || env.businessPublicName,
+        businessWhatsapp: business.whatsapp || env.businessWhatsapp,
+      })
+    );
+  }
+
+  return updatedSerialized;
 }

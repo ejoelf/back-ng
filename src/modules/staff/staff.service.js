@@ -1,7 +1,18 @@
-import { Staff, Business, Block, RecurringBlock, ServiceStaff } from "../../database/models/index.js";
+import {
+  Staff,
+  Business,
+  Block,
+  RecurringBlock,
+  ServiceStaff,
+} from "../../database/models/index.js";
 
 function toPlain(row) {
   return row ? row.get({ plain: true }) : null;
+}
+
+function normalizeDisplayOrder(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
 function normalizeStaffResponse(row) {
@@ -24,6 +35,7 @@ function normalizeStaffResponse(row) {
     photoUrl: data.photoUrl || "",
     skills: Array.isArray(data.skillsJson) ? data.skillsJson : [],
     scheduleOverride: data.scheduleOverrideJson || null,
+    displayOrder: Number(data.displayOrder ?? 0) || 0,
     isOwner: Boolean(data.isOwner),
     isActive: Boolean(data.isActive),
     createdAt: data.createdAt,
@@ -57,6 +69,7 @@ export async function listStaffService() {
   const rows = await Staff.findAll({
     where: { isActive: true },
     order: [
+      ["displayOrder", "ASC"],
       ["isOwner", "DESC"],
       ["name", "ASC"],
     ],
@@ -87,6 +100,7 @@ export async function createStaffService(payload) {
     photoUrl: payload.photoUrl || "",
     skillsJson: Array.isArray(payload.skills) ? payload.skills : [],
     scheduleOverrideJson: payload.scheduleOverride || null,
+    displayOrder: normalizeDisplayOrder(payload.displayOrder),
     isOwner: Boolean(payload.isOwner),
     isActive: true,
   });
@@ -110,6 +124,7 @@ export async function updateStaffService(staffId, payload) {
     photoUrl: payload.photoUrl || "",
     skillsJson: Array.isArray(payload.skills) ? payload.skills : [],
     scheduleOverrideJson: payload.scheduleOverride || null,
+    displayOrder: normalizeDisplayOrder(payload.displayOrder),
     isOwner: Boolean(payload.isOwner),
   });
 

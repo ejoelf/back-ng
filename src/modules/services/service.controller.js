@@ -16,6 +16,14 @@ function normalizeNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function capitalizeWords(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 async function getDefaultBusinessId() {
   const business = await Business.findOne({
     order: [["createdAt", "ASC"]],
@@ -73,11 +81,12 @@ export async function listServicesController(req, res, next) {
 
 export async function createServiceController(req, res, next) {
   try {
-    const name = normalizeString(req.body.name);
+    const name = capitalizeWords(req.body.name);
     const code = normalizeString(req.body.code);
     const imageUrl = normalizeString(req.body.imageUrl);
     const durationMin = normalizeNumber(req.body.durationMin, 30);
     const price = normalizeNumber(req.body.price, 0);
+    const displayOrder = normalizeNumber(req.body.displayOrder, 0);
 
     if (!name) {
       return fail(res, "El nombre del servicio es obligatorio.", 400);
@@ -89,6 +98,10 @@ export async function createServiceController(req, res, next) {
 
     if (price < 0) {
       return fail(res, "El precio no puede ser negativo.", 400);
+    }
+
+    if (displayOrder < 0) {
+      return fail(res, "El orden visual no puede ser negativo.", 400);
     }
 
     const allowedCheck = await validateAllowedStaffIds(req.body.allowedStaffIds);
@@ -108,6 +121,7 @@ export async function createServiceController(req, res, next) {
       durationMin,
       price,
       imageUrl,
+      displayOrder,
       allowedStaffIds: allowedCheck.ids,
     });
 
@@ -120,11 +134,12 @@ export async function createServiceController(req, res, next) {
 export async function updateServiceController(req, res, next) {
   try {
     const serviceId = String(req.params.id || "").trim();
-    const name = normalizeString(req.body.name);
+    const name = capitalizeWords(req.body.name);
     const code = normalizeString(req.body.code);
     const imageUrl = normalizeString(req.body.imageUrl);
     const durationMin = normalizeNumber(req.body.durationMin, 30);
     const price = normalizeNumber(req.body.price, 0);
+    const displayOrder = normalizeNumber(req.body.displayOrder, 0);
 
     if (!serviceId) {
       return fail(res, "Falta el id del servicio.", 400);
@@ -142,6 +157,10 @@ export async function updateServiceController(req, res, next) {
       return fail(res, "El precio no puede ser negativo.", 400);
     }
 
+    if (displayOrder < 0) {
+      return fail(res, "El orden visual no puede ser negativo.", 400);
+    }
+
     const allowedCheck = await validateAllowedStaffIds(req.body.allowedStaffIds);
 
     if (!allowedCheck.ok) {
@@ -156,6 +175,7 @@ export async function updateServiceController(req, res, next) {
       durationMin,
       price,
       imageUrl,
+      displayOrder,
       allowedStaffIds: allowedCheck.ids,
     });
 

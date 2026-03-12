@@ -83,6 +83,13 @@ export const Staff = sequelize.define(
       field: "schedule_override_json",
     },
 
+    displayOrder: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      field: "display_order",
+    },
+
     isOwner: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

@@ -46,6 +46,13 @@ export const Service = sequelize.define(
       field: "image_url",
     },
 
+    displayOrder: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      field: "display_order",
+    },
+
     isActive: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

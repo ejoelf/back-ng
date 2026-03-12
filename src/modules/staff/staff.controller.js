@@ -17,6 +17,14 @@ function normalizeNullableString(value) {
   return text || "";
 }
 
+function capitalizeWords(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function normalizeNullableNumber(value) {
   if (value === "" || value === null || value === undefined) return null;
   const n = Number(value);
@@ -74,10 +82,11 @@ async function getDefaultBusinessId() {
 }
 
 function buildStaffPayload(body) {
-  const firstName = normalizeNullableString(body.firstName);
-  const lastName = normalizeNullableString(body.lastName);
-  const fallbackName = normalizeNullableString(body.name);
+  const firstName = capitalizeWords(body.firstName);
+  const lastName = capitalizeWords(body.lastName);
+  const fallbackName = capitalizeWords(body.name);
   const fullName = `${firstName} ${lastName}`.trim() || fallbackName;
+  const displayOrder = Number(body.displayOrder);
 
   return {
     name: fullName,
@@ -92,6 +101,7 @@ function buildStaffPayload(body) {
     photoUrl: normalizeNullableString(body.photoUrl),
     skills: normalizeSkills(body.skills),
     scheduleOverride: normalizeScheduleOverride(body.scheduleOverride),
+    displayOrder: Number.isFinite(displayOrder) && displayOrder >= 0 ? displayOrder : 0,
     isOwner: Boolean(body.isOwner),
   };
 }
@@ -103,6 +113,10 @@ function validateStaffPayload(payload) {
 
   if (payload.age !== null && payload.age < 0) {
     return "La edad no puede ser negativa.";
+  }
+
+  if (payload.displayOrder < 0) {
+    return "El orden visual no puede ser negativo.";
   }
 
   return null;
