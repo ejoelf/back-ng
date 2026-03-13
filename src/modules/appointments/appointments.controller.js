@@ -15,17 +15,20 @@ function safeString(value) {
   return value == null ? "" : String(value).trim();
 }
 
-async function trySendAppointmentEmail(appointment) {
-  try {
-    return await sendAppointmentConfirmationEmail({
-      appointment,
-      businessName: env.businessPublicName,
-      businessWhatsapp: env.businessWhatsapp,
+function fireAndForget(promiseFactory) {
+  Promise.resolve()
+    .then(() => promiseFactory())
+    .catch((error) => {
+      console.error("[mail] No se pudo enviar el email de confirmación:", error);
     });
-  } catch (error) {
-    console.error("[mail] No se pudo enviar el email de confirmación:", error);
-    return { sent: false, skipped: false, reason: "send-error" };
-  }
+}
+
+async function trySendAppointmentEmail(appointment) {
+  return sendAppointmentConfirmationEmail({
+    appointment,
+    businessName: env.businessPublicName,
+    businessWhatsapp: env.businessWhatsapp,
+  });
 }
 
 export async function getPublicAvailabilityController(req, res, next) {
@@ -120,16 +123,28 @@ export async function createPublicAppointmentController(req, res, next) {
       },
     });
 
-    const emailResult = await trySendAppointmentEmail(appointment);
+    if (clientEmail) {
+      fireAndForget(() => trySendAppointmentEmail(appointment));
+    }
 
     return ok(
       res,
       {
-        message: emailResult?.sent
-          ? "Turno creado correctamente y email enviado."
-          : "Turno creado correctamente.",
+        message: "Turno creado correctamente.",
         appointment,
-        emailNotification: emailResult,
+        emailNotification: clientEmail
+          ? {
+              sent: false,
+              queued: true,
+              skipped: false,
+              reason: null,
+            }
+          : {
+              sent: false,
+              queued: false,
+              skipped: true,
+              reason: "missing-recipient",
+            },
       },
       201
     );
@@ -175,25 +190,29 @@ export async function createManualAppointmentController(req, res, next) {
       },
     });
 
-    let emailResult = {
+    let emailNotification = {
       sent: false,
+      queued: false,
       skipped: true,
       reason: finalClientEmail ? "manual-opt-out" : "missing-recipient",
     };
 
     if (finalClientEmail && Boolean(sendEmailNotification)) {
-      emailResult = await trySendAppointmentEmail(appointment);
+      fireAndForget(() => trySendAppointmentEmail(appointment));
+      emailNotification = {
+        sent: false,
+        queued: true,
+        skipped: false,
+        reason: null,
+      };
     }
 
     return ok(
       res,
       {
-        message:
-          emailResult?.sent
-            ? "Turno creado correctamente y email enviado."
-            : "Turno creado correctamente.",
+        message: "Turno creado correctamente.",
         appointment,
-        emailNotification: emailResult,
+        emailNotification,
       },
       201
     );
