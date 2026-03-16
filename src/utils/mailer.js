@@ -63,7 +63,6 @@ async function getTransporter() {
         host: env.mailHost,
         port: Number(env.mailPort) || 587,
 
-        // Brevo usa STARTTLS en 587
         secure: Number(env.mailPort) === 465,
 
         auth: {
