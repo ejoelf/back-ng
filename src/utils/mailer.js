@@ -62,11 +62,16 @@ async function getTransporter() {
       nodemailer.createTransport({
         host: env.mailHost,
         port: Number(env.mailPort) || 587,
-        secure: false, // STARTTLS
+
+        // Brevo usa STARTTLS en 587
+        secure: Number(env.mailPort) === 465,
+
         auth: {
           user: env.mailUser,
           pass: env.mailPass,
         },
+
+        requireTLS: true,
 
         tls: {
           rejectUnauthorized: false,
