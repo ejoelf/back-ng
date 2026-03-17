@@ -61,16 +61,14 @@ async function getTransporter() {
     transporterPromise = Promise.resolve(
       nodemailer.createTransport({
         host: env.mailHost,
-        port: Number(env.mailPort) || 587,
+        port: Number(env.mailPort) || 2525,
 
-        secure: Number(env.mailPort) === 465,
+        secure: false,
 
         auth: {
           user: env.mailUser,
           pass: env.mailPass,
         },
-
-        requireTLS: true,
 
         tls: {
           rejectUnauthorized: false,
