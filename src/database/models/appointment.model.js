@@ -106,10 +106,26 @@ export const Appointment = sequelize.define(
       defaultValue: false,
       field: "allow_overlap",
     },
+
+    // 🔥 NUEVO CAMPO
+    confirmationCode: {
+      type: DataTypes.STRING(10),
+      allowNull: false,
+      unique: true,
+      field: "confirmation_code",
+    },
+    // 🔥 NUEVO CAMPO
+rescheduleCount: {
+  type: DataTypes.INTEGER,
+  allowNull: false,
+  defaultValue: 0,
+  field: "reschedule_count",
+},
   },
   {
     tableName: "appointments",
     underscored: true,
     timestamps: true,
   }
+  
 );

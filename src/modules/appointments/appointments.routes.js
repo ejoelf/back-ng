@@ -9,8 +9,12 @@ import {
   updateAppointmentStatusController,
   cancelAppointmentController,
   rescheduleAppointmentController,
+  getAppointmentByCodeController,
+  cancelAppointmentByCodeController,
+  rescheduleAppointmentByCodeController,
 } from "./appointments.controller.js";
 import { requireAuth } from "../../middlewares/auth.middleware.js";
+import { searchPublicAppointments } from "./appointments.public.controller.js";
 
 const router = Router();
 
@@ -19,6 +23,12 @@ const router = Router();
 // =========================
 router.get("/public/availability", getPublicAvailabilityController);
 router.post("/appointments/public", createPublicAppointmentController);
+router.post("/appointments/search-public", searchPublicAppointments);
+
+// Gestión pública por código
+router.get("/appointments/by-code/:code", getAppointmentByCodeController);
+router.post("/appointments/cancel-by-code", cancelAppointmentByCodeController);
+router.post("/appointments/reschedule-by-code", rescheduleAppointmentByCodeController);
 
 // =========================
 // Privadas

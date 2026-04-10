@@ -30,6 +30,11 @@ import {
   sendAppointmentCancellationEmail,
   sendAppointmentRescheduledEmail,
 } from "../../utils/mailer.js";
+import { createNotification } from "../notifications/notifications.service.js";
+
+function generateConfirmationCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
 function safeString(value) {
   return value == null ? "" : String(value).trim();
@@ -295,6 +300,9 @@ function serializeAppointment(row) {
     channel: row.channel || "web",
     allowOverlap: Boolean(row.allowOverlap),
 
+    confirmationCode: row.confirmationCode || "",
+    rescheduleCount: Number(row.rescheduleCount ?? 0) || 0,
+
     clientName: row.clientName || client?.name || "Cliente",
     clientPhone: row.clientPhone || client?.phone || "",
     clientEmail: row.clientEmail || client?.email || "",
@@ -481,7 +489,6 @@ async function findOrCreateClient({ transaction, businessId, client }) {
         phone,
         email: email || null,
         notes: null,
-        isActive: true,
       },
       { transaction }
     );
@@ -493,7 +500,11 @@ async function findOrCreateClient({ transaction, businessId, client }) {
 
   if (!safeString(row.name)) patch.name = capitalizeName(name);
   if (email && !safeString(row.email)) patch.email = email;
-  if (row.isActive === false) patch.isActive = true;
+
+  if (row.isDeleted === true) {
+    patch.isDeleted = false;
+    patch.deletedAt = null;
+  }
 
   if (Object.keys(patch).length > 0) {
     await row.update(patch, { transaction });
@@ -572,6 +583,18 @@ export async function createAppointment({
       allowOverlap: Boolean(allowOverlap),
     });
 
+    let confirmationCode;
+    let exists;
+
+    do {
+      confirmationCode = generateConfirmationCode();
+
+      exists = await Appointment.findOne({
+        where: { confirmationCode },
+        transaction,
+      });
+    } while (exists);
+
     const appointment = await Appointment.create(
       {
         businessId,
@@ -592,6 +615,9 @@ export async function createAppointment({
         serviceName: service.name,
         staffName: staff.name,
         price: Number(service.price || 0),
+
+        confirmationCode,
+        rescheduleCount: 0,
       },
       { transaction }
     );
@@ -621,7 +647,22 @@ export async function createAppointment({
       transaction,
     });
 
-    return serializeAppointment(created);
+    const serialized = serializeAppointment(created);
+
+    fireAndForget(() =>
+      createNotification({
+        type: "new",
+        title: "Nuevo turno",
+        message: `${serialized.clientName} - ${serialized.serviceName} con ${serialized.staffName}`,
+        data: {
+          appointmentId: serialized.id,
+          dateStr: serialized.dateStr,
+          startAt: serialized.startAt,
+        },
+      })
+    );
+
+    return serialized;
   });
 }
 
@@ -661,6 +702,10 @@ export async function cancelAppointment({ appointmentId }) {
     throw new AppError("Turno no encontrado.", 404);
   }
 
+  if (row.status === "cancelled") {
+    throw new AppError("El turno ya está cancelado.", 400);
+  }
+
   row.status = "cancelled";
   await row.save();
 
@@ -677,6 +722,19 @@ export async function cancelAppointment({ appointmentId }) {
   }
 
   const serialized = serializeAppointment(row);
+
+  fireAndForget(() =>
+    createNotification({
+      type: "cancelled",
+      title: "Turno cancelado",
+      message: `${serialized.clientName} - ${serialized.serviceName}`,
+      data: {
+        appointmentId: serialized.id,
+        dateStr: serialized.dateStr,
+        startAt: serialized.startAt,
+      },
+    })
+  );
 
   if (serialized.clientEmail) {
     fireAndForget(() =>
@@ -775,6 +833,19 @@ export async function rescheduleAppointment({
 
   const updatedSerialized = serializeAppointment(updated);
 
+  fireAndForget(() =>
+    createNotification({
+      type: "rescheduled",
+      title: "Turno reprogramado",
+      message: `${updatedSerialized.clientName} - ${updatedSerialized.serviceName}`,
+      data: {
+        appointmentId: updatedSerialized.id,
+        startAt: updatedSerialized.startAt,
+        dateStr: updatedSerialized.dateStr,
+      },
+    })
+  );
+
   if (updatedSerialized.clientEmail) {
     fireAndForget(() =>
       sendAppointmentRescheduledEmail({
@@ -787,4 +858,102 @@ export async function rescheduleAppointment({
   }
 
   return updatedSerialized;
+}
+
+export async function getAppointmentByCode({ code }) {
+  const codeSafe = safeString(code);
+
+  if (!codeSafe) {
+    throw new AppError("El código es obligatorio.", 400);
+  }
+
+  const row = await Appointment.findOne({
+    where: {
+      confirmationCode: codeSafe,
+    },
+    include: [
+      { model: Client, as: "client" },
+      { model: Service, as: "service" },
+      { model: Staff, as: "staff" },
+    ],
+  });
+
+  if (!row) {
+    throw new AppError("Turno no encontrado.", 404);
+  }
+
+  return serializeAppointment(row);
+}
+
+export async function rescheduleAppointmentByCode({
+  code,
+  newStartAtISO,
+  newStaffId,
+}) {
+  const codeSafe = safeString(code);
+
+  if (!codeSafe) {
+    throw new AppError("El código es obligatorio.", 400);
+  }
+
+  const row = await Appointment.findOne({
+    where: { confirmationCode: codeSafe },
+  });
+
+  if (!row) {
+    throw new AppError("Turno no encontrado.", 404);
+  }
+
+  if (row.status === "cancelled") {
+    throw new AppError("No se puede reprogramar un turno cancelado.", 400);
+  }
+
+  if ((Number(row.rescheduleCount ?? 0) || 0) >= 2) {
+    throw new AppError(
+      "Este turno ya fue reprogramado demasiadas veces. Contactá con la peluquería.",
+      400
+    );
+  }
+
+  const updatedAppointment = await rescheduleAppointment({
+    appointmentId: row.id,
+    newStartAtISO,
+    newStaffId,
+  });
+
+  await row.update({
+    rescheduleCount: (Number(row.rescheduleCount ?? 0) || 0) + 1,
+  });
+
+  const refreshed = await Appointment.findByPk(row.id, {
+    include: [
+      { model: Client, as: "client" },
+      { model: Service, as: "service" },
+      { model: Staff, as: "staff" },
+    ],
+  });
+
+  return serializeAppointment(refreshed || updatedAppointment);
+}
+
+export async function cancelAppointmentByCode({ code }) {
+  const codeSafe = safeString(code);
+
+  if (!codeSafe) {
+    throw new AppError("El código es obligatorio.", 400);
+  }
+
+  const row = await Appointment.findOne({
+    where: { confirmationCode: codeSafe },
+  });
+
+  if (!row) {
+    throw new AppError("Turno no encontrado.", 404);
+  }
+
+  if (row.status === "cancelled") {
+    throw new AppError("El turno ya está cancelado.", 400);
+  }
+
+  return cancelAppointment({ appointmentId: row.id });
 }

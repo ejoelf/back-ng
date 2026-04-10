@@ -11,6 +11,7 @@ import { Block } from "./block.model.js";
 import { RecurringBlock } from "./recurringBlock.model.js";
 import { SpecialDay } from "./specialDay.model.js";
 import { ServiceStaff } from "./serviceStaff.model.js";
+import { Notification } from "./notifications.model.js";
 
 /* =========================
    RELACIONES
@@ -103,4 +104,5 @@ export {
   RecurringBlock,
   SpecialDay,
   ServiceStaff,
+  Notification,
 };

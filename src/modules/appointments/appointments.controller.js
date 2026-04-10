@@ -8,6 +8,9 @@ import {
   updateAppointmentStatus,
   cancelAppointment,
   rescheduleAppointment,
+  getAppointmentByCode,
+  cancelAppointmentByCode,
+  rescheduleAppointmentByCode,
 } from "./appointments.service.js";
 import { sendAppointmentConfirmationEmail } from "../../utils/mailer.js";
 
@@ -34,6 +37,15 @@ async function trySendAppointmentEmail(appointment) {
 export async function getPublicAvailabilityController(req, res, next) {
   try {
     const { dateStr, serviceId, staffId } = req.query;
+
+    if (!dateStr || !serviceId || !staffId) {
+      return res.status(400).json({
+        ok: false,
+        error: {
+          message: "Faltan datos para obtener disponibilidad.",
+        },
+      });
+    }
 
     const slots = await getAvailability({
       dateStr,
@@ -262,6 +274,51 @@ export async function rescheduleAppointmentController(req, res, next) {
 
     const appointment = await rescheduleAppointment({
       appointmentId: id,
+      newStartAtISO,
+      newStaffId,
+    });
+
+    return ok(res, {
+      message: "Turno reprogramado correctamente.",
+      appointment,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getAppointmentByCodeController(req, res, next) {
+  try {
+    const code = safeString(req.params?.code || req.query?.code);
+
+    const appointment = await getAppointmentByCode({ code });
+
+    return ok(res, { appointment });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function cancelAppointmentByCodeController(req, res, next) {
+  try {
+    const { code } = req.body;
+
+    await cancelAppointmentByCode({ code });
+
+    return ok(res, {
+      message: "Turno cancelado correctamente.",
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function rescheduleAppointmentByCodeController(req, res, next) {
+  try {
+    const { code, newStartAtISO, newStaffId } = req.body;
+
+    const appointment = await rescheduleAppointmentByCode({
+      code,
       newStartAtISO,
       newStaffId,
     });

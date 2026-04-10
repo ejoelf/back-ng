@@ -54,6 +54,20 @@ function formatTimeAR(value) {
   }).format(date);
 }
 
+function getFrontendBaseUrl() {
+  return String(env.frontendUrl || env.FRONTEND_URL || "")
+    .trim()
+    .replace(/\/+$/, "");
+}
+
+function buildManageUrl(confirmationCode) {
+  const baseUrl = getFrontendBaseUrl();
+  const code = String(confirmationCode || "").trim();
+
+  if (!baseUrl || !code) return "";
+  return `${baseUrl}/turno?code=${encodeURIComponent(code)}`;
+}
+
 async function getTransporter() {
   if (!hasMailerConfig()) return null;
 
@@ -62,18 +76,14 @@ async function getTransporter() {
       nodemailer.createTransport({
         host: env.mailHost,
         port: Number(env.mailPort) || 2525,
-
         secure: false,
-
         auth: {
           user: env.mailUser,
           pass: env.mailPass,
         },
-
         tls: {
           rejectUnauthorized: false,
         },
-
         connectionTimeout: 20000,
         greetingTimeout: 20000,
         socketTimeout: 20000,
@@ -116,7 +126,11 @@ function buildShellHtml({ eyebrow, title, intro, bodyHtml, footerHtml }) {
   `;
 }
 
-function buildDetailCardHtml({ lines, accent = "#93c5fd", title = "Detalle del turno" }) {
+function buildDetailCardHtml({
+  lines,
+  accent = "#93c5fd",
+  title = "Detalle del turno",
+}) {
   const rows = lines
     .map(
       (line) => `
@@ -150,6 +164,30 @@ function buildInfoFooterHtml({ message, businessWhatsapp }) {
   `;
 }
 
+function buildPrimaryActionButtonHtml({ href, label, background = "#2563eb" }) {
+  if (!href) return "";
+
+  return `
+    <div style="margin-top:20px;text-align:center;">
+      <a 
+        href="${href}"
+        style="
+          display:inline-block;
+          padding:12px 20px;
+          background:${background};
+          color:#fff;
+          text-decoration:none;
+          border-radius:10px;
+          font-size:14px;
+          font-weight:bold;
+        "
+      >
+        ${escapeHtml(label)}
+      </a>
+    </div>
+  `;
+}
+
 function baseAppointmentLines(appointment) {
   return [
     { label: "Servicio", value: appointment?.serviceName || "Servicio" },
@@ -160,31 +198,47 @@ function baseAppointmentLines(appointment) {
     { label: "Teléfono", value: appointment?.clientPhone || "—" },
     { label: "Email", value: appointment?.clientEmail || "—" },
     { label: "Observaciones", value: appointment?.notes || "Sin observaciones" },
+    {
+      label: "Código de confirmación",
+      value: appointment?.confirmationCode || "—",
+    },
   ];
 }
 
 function buildAppointmentEmailHtml({ appointment, businessName, businessWhatsapp }) {
   const clientName = escapeHtml(appointment?.clientName || "Cliente");
   const businessText = escapeHtml(businessName || env.businessPublicName);
+  const manageUrl = buildManageUrl(appointment?.confirmationCode);
 
   return buildShellHtml({
     eyebrow: "Confirmación de turno",
     title: businessText,
     intro: `Hola ${clientName}, tu turno fue reservado correctamente. Te dejamos el detalle para que lo tengas a mano.`,
-    bodyHtml: buildDetailCardHtml({
-      title: "Detalle del turno",
-      accent: "#93c5fd",
-      lines: baseAppointmentLines(appointment),
-    }),
+
+    bodyHtml: `
+      ${buildDetailCardHtml({
+        title: "Detalle del turno",
+        accent: "#93c5fd",
+        lines: baseAppointmentLines(appointment),
+      })}
+
+      ${buildPrimaryActionButtonHtml({
+        href: manageUrl,
+        label: "Gestionar mi turno",
+      })}
+    `,
+
     footerHtml: buildInfoFooterHtml({
       message:
-        "<strong>Importante:</strong> si necesitás modificar o cancelar el turno, escribinos con tiempo así podemos ayudarte.",
+        "<strong>Importante:</strong> si querés gestionar tu turno, hacé click en el botón superior o comunicate con la peluquería por WhatsApp.",
       businessWhatsapp,
     }),
   });
 }
 
 function buildAppointmentEmailText({ appointment, businessName, businessWhatsapp }) {
+  const manageUrl = buildManageUrl(appointment?.confirmationCode);
+
   return [
     businessName || env.businessPublicName,
     "",
@@ -198,9 +252,11 @@ function buildAppointmentEmailText({ appointment, businessName, businessWhatsapp
     `Teléfono: ${appointment?.clientPhone || "—"}`,
     `Email: ${appointment?.clientEmail || "—"}`,
     `Observaciones: ${appointment?.notes || "Sin observaciones"}`,
+    `Código de confirmación: ${appointment?.confirmationCode || "—"}`,
     businessWhatsapp || env.businessWhatsapp
       ? `WhatsApp del salón: ${businessWhatsapp || env.businessWhatsapp}`
       : null,
+    manageUrl ? `Gestionar turno: ${manageUrl}` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -238,6 +294,7 @@ function buildCancellationEmailText({ appointment, businessName, businessWhatsap
     `Fecha original: ${formatDateAR(appointment?.startAt)}`,
     `Hora original: ${formatTimeAR(appointment?.startAt)} hs`,
     `Cliente: ${appointment?.clientName || "Cliente"}`,
+    `Código de confirmación: ${appointment?.confirmationCode || "—"}`,
     businessWhatsapp || env.businessWhatsapp
       ? `WhatsApp del salón: ${businessWhatsapp || env.businessWhatsapp}`
       : null,
@@ -254,14 +311,23 @@ function buildRescheduledEmailHtml({
   businessName,
   businessWhatsapp,
 }) {
-  const clientName = escapeHtml(updatedAppointment?.clientName || previousAppointment?.clientName || "Cliente");
+  const clientName = escapeHtml(
+    updatedAppointment?.clientName || previousAppointment?.clientName || "Cliente"
+  );
   const businessText = escapeHtml(businessName || env.businessPublicName);
+  const manageUrl = buildManageUrl(
+    updatedAppointment?.confirmationCode || previousAppointment?.confirmationCode
+  );
 
   const oldLines = [
     { label: "Servicio", value: previousAppointment?.serviceName || "Servicio" },
     { label: "Profesional", value: previousAppointment?.staffName || "Staff" },
     { label: "Fecha", value: formatDateAR(previousAppointment?.startAt) },
     { label: "Hora", value: `${formatTimeAR(previousAppointment?.startAt)} hs` },
+    {
+      label: "Código de confirmación",
+      value: previousAppointment?.confirmationCode || "—",
+    },
   ];
 
   const newLines = [
@@ -273,6 +339,13 @@ function buildRescheduledEmailHtml({
     { label: "Teléfono", value: updatedAppointment?.clientPhone || "—" },
     { label: "Email", value: updatedAppointment?.clientEmail || "—" },
     { label: "Observaciones", value: updatedAppointment?.notes || "Sin observaciones" },
+    {
+      label: "Código de confirmación",
+      value:
+        updatedAppointment?.confirmationCode ||
+        previousAppointment?.confirmationCode ||
+        "—",
+    },
   ];
 
   return buildShellHtml({
@@ -291,6 +364,11 @@ function buildRescheduledEmailHtml({
         accent: "#86efac",
         lines: newLines,
       })}
+
+      ${buildPrimaryActionButtonHtml({
+        href: manageUrl,
+        label: "Gestionar mi turno",
+      })}
     `,
     footerHtml: buildInfoFooterHtml({
       message:
@@ -306,6 +384,10 @@ function buildRescheduledEmailText({
   businessName,
   businessWhatsapp,
 }) {
+  const manageUrl = buildManageUrl(
+    updatedAppointment?.confirmationCode || previousAppointment?.confirmationCode
+  );
+
   return [
     businessName || env.businessPublicName,
     "",
@@ -316,6 +398,7 @@ function buildRescheduledEmailText({
     `- Profesional: ${previousAppointment?.staffName || "Staff"}`,
     `- Fecha: ${formatDateAR(previousAppointment?.startAt)}`,
     `- Hora: ${formatTimeAR(previousAppointment?.startAt)} hs`,
+    `- Código de confirmación: ${previousAppointment?.confirmationCode || "—"}`,
     "",
     "Nuevo turno:",
     `- Servicio: ${updatedAppointment?.serviceName || "Servicio"}`,
@@ -323,9 +406,15 @@ function buildRescheduledEmailText({
     `- Fecha: ${formatDateAR(updatedAppointment?.startAt)}`,
     `- Hora: ${formatTimeAR(updatedAppointment?.startAt)} hs`,
     `- Cliente: ${updatedAppointment?.clientName || "Cliente"}`,
+    `- Código de confirmación: ${
+      updatedAppointment?.confirmationCode ||
+      previousAppointment?.confirmationCode ||
+      "—"
+    }`,
     businessWhatsapp || env.businessWhatsapp
       ? `WhatsApp del salón: ${businessWhatsapp || env.businessWhatsapp}`
       : null,
+    manageUrl ? `Gestionar turno: ${manageUrl}` : null,
     "",
     "Si necesitás otra modificación o tenés alguna duda, comunicate con la peluquería.",
   ]

@@ -12,12 +12,14 @@ import specialDaysRoutes from "../modules/special-days/specialDays.routes.js";
 import recurringBlocksRoutes from "../modules/recurring-blocks/recurringBlocks.routes.js";
 import exportsRoutes from "../modules/exports/exports.routes.js";
 import businessRoutes from "../modules/business/business.routes.js";
+import contactRoutes from "../modules/contact/contact.routes.js";
 
 import { requireAuth } from "../middlewares/auth.middleware.js";
 import {
   meController,
   updateCredentialsController,
 } from "../modules/auth/auth.controller.js";
+import notificationsRoutes from "../modules/notifications/notifications.routes.js";
 
 const router = Router();
 
@@ -43,12 +45,13 @@ router.use("/business", businessRoutes);
 router.use("/services", serviceRoutes);
 router.use("/staff", staffRoutes);
 router.use("/clients", clientsRoutes);
-
+router.use("/notifications", notificationsRoutes);
 router.use(appointmentsRoutes);
 router.use(incomesRoutes);
 router.use("/blocks",blocksRoutes);
 router.use("/special-days",specialDaysRoutes);
 router.use("/recurring-blocks",recurringBlocksRoutes);
-router.use("/exports",exportsRoutes);
+router.use("/exports", exportsRoutes);
+router.use("/contact", contactRoutes);
 
 export default router;
